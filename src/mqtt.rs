@@ -1,5 +1,5 @@
 use super::{Cli, Event};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use matrix_sdk::ruma::RoomId;
 use paho_mqtt::{AsyncClient, ConnectOptionsBuilder, CreateOptionsBuilder, Message};
 use std::{env, str::FromStr};
@@ -56,29 +56,40 @@ pub(crate) async fn run(tx: Sender<Event>, args: Cli) -> Result<JoinHandle<()>> 
                                     log::error!("Error sending message: {}", e);
                                 }
                             }
-                            Err(e) => log::error!("Error creating/queuing the message: {}", e),
+                            Err(e) => {
+                                log::error!("Error creating/queuing the message: {}", e);
+                            }
                         }
                     }
                     _ => {}
                 }
             }
 
-            if let Ok(Some(msg)) = stream.try_recv() {
-                log::info! {"Received message on topic \"{}\"", msg.topic()};
-                match msg.topic().split('/').nth(1) {
-                    Some(room) => match RoomId::from_str(room) {
-                        Ok(room) => {
-                            if let Err(e) = tx.send(Event::MessageFromMqtt(super::Message {
-                                room,
-                                body: msg.payload_str().to_string(),
-                            })) {
-                                log::error!("Failed to notify of new message from MQTT: {}", e);
+            match stream.try_recv() {
+                Ok(Some(msg)) => {
+                    log::info! {"Received message on topic \"{}\"", msg.topic()};
+                    match msg.topic().split('/').nth(1) {
+                        Some(room) => match RoomId::from_str(room) {
+                            Ok(room) => {
+                                if let Err(e) = tx.send(Event::MessageFromMqtt(super::Message {
+                                    room,
+                                    body: msg.payload_str().to_string(),
+                                })) {
+                                    log::error!("Failed to notify of new message from MQTT: {}", e);
+                                }
                             }
-                        }
-                        Err(e) => log::error!("Failed to get room ID: {}", e),
-                    },
-                    None => log::error!("Failed to get room ID"),
+                            Err(e) => log::error!("Failed to get room ID: {}", e),
+                        },
+                        None => log::error!("Failed to get room ID"),
+                    }
                 }
+                Ok(None) => {
+                    if let Err(e) = try_reconnect(&client).await {
+                        log::error!("Failed to reconnect: {}", e);
+                        tx.send(Event::Exit).unwrap();
+                    }
+                }
+                Err(_) => (),
             }
 
             beat.tick().await;
@@ -91,4 +102,21 @@ fn generate_subscriptions(args: &Cli) -> Vec<String> {
         .iter()
         .map(|r| format!("{}/{}/send/text", args.mqtt_topic_prefix, r))
         .collect()
+}
+
+async fn try_reconnect(c: &AsyncClient) -> Result<()> {
+    for i in 0..10 {
+        log::info!("Attempting reconnection {}...", i);
+        match c.reconnect().await {
+            Ok(_) => {
+                log::info!("Reconnection successful");
+                return Ok(());
+            }
+            Err(e) => {
+                log::error!("Reconnection failed: {}", e);
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    Err(anyhow!("Failed to reconnect to broker"))
 }
