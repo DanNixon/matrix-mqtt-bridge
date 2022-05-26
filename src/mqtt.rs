@@ -9,13 +9,6 @@ use tokio::{
     time::{self, Duration},
 };
 
-fn generate_subscriptions(args: &Cli) -> Vec<String> {
-    args.matrix_rooms
-        .iter()
-        .map(|r| format! {"{}/{}/send/text", args.mqtt_topic_prefix, r})
-        .collect()
-}
-
 pub(crate) async fn run(tx: Sender<Event>, args: Cli) -> Result<JoinHandle<()>> {
     let mut client = AsyncClient::new(
         CreateOptionsBuilder::new()
@@ -49,7 +42,7 @@ pub(crate) async fn run(tx: Sender<Event>, args: Cli) -> Result<JoinHandle<()>> 
             if let Ok(event) = rx.try_recv() {
                 match event {
                     Event::Exit => {
-                        log::debug! {"MQTT task exit"};
+                        log::debug!("Task exit");
                         return;
                     }
                     Event::MessageFromMatrix(msg) => {
@@ -60,10 +53,10 @@ pub(crate) async fn run(tx: Sender<Event>, args: Cli) -> Result<JoinHandle<()>> 
                         )) {
                             Ok(delivery_token) => {
                                 if let Err(e) = delivery_token.wait() {
-                                    log::error! {"Error sending message: {}", e};
+                                    log::error!("Error sending message: {}", e);
                                 }
                             }
-                            Err(e) => log::error! {"Error creating/queuing the message: {}", e},
+                            Err(e) => log::error!("Error creating/queuing the message: {}", e),
                         }
                     }
                     _ => {}
@@ -79,16 +72,23 @@ pub(crate) async fn run(tx: Sender<Event>, args: Cli) -> Result<JoinHandle<()>> 
                                 room,
                                 body: msg.payload_str().to_string(),
                             })) {
-                                log::error! {"Failed to notify of new message from MQTT: {}", e};
+                                log::error!("Failed to notify of new message from MQTT: {}", e);
                             }
                         }
-                        Err(e) => log::error! {"Failed to get room ID: {}", e},
+                        Err(e) => log::error!("Failed to get room ID: {}", e),
                     },
-                    None => log::error! {"Failed to get room ID"},
+                    None => log::error!("Failed to get room ID"),
                 }
             }
 
             beat.tick().await;
         }
     }))
+}
+
+fn generate_subscriptions(args: &Cli) -> Vec<String> {
+    args.matrix_rooms
+        .iter()
+        .map(|r| format!("{}/{}/send/text", args.mqtt_topic_prefix, r))
+        .collect()
 }

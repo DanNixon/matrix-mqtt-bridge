@@ -63,7 +63,6 @@ async fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let args = Cli::parse();
-    log::debug! {"{:?}", args};
 
     let (tx, mut rx) = broadcast::channel::<Event>(16);
 
@@ -90,11 +89,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    log::info! {"Terminating..."};
+    log::info!("Terminating...");
     tx.send(Event::Exit)?;
     for task in tasks {
         if let Err(e) = task.await {
-            log::error! {"Failed waiting for task to finish: {}", e};
+            log::error!("Failed waiting for task to finish: {}", e);
         }
     }
     matrix_sync_task.abort();
