@@ -10,38 +10,54 @@ use tokio::{signal, sync::broadcast};
 #[derive(Clone, Debug, Parser)]
 struct Cli {
     /// Address of MQTT broker to connect to
-    #[clap(long, env = "MQTT_BROKER", default_value = "tcp://localhost:1883")]
+    #[clap(
+        value_parser,
+        long,
+        env = "MQTT_BROKER",
+        default_value = "tcp://localhost:1883"
+    )]
     mqtt_broker: String,
 
     /// Client ID to use when connecting to MQTT broker
-    #[clap(long, env = "MQTT_CLIENT_ID", default_value = "matrix-mqtt-bridge")]
+    #[clap(
+        value_parser,
+        long,
+        env = "MQTT_CLIENT_ID",
+        default_value = "matrix-mqtt-bridge"
+    )]
     mqtt_client_id: String,
 
     /// MQTT QoS, must be 0, 1 or 2
-    #[clap(long, env = "MQTT_QOS", default_value = "0")]
+    #[clap(value_parser, long, env = "MQTT_QOS", default_value = "0")]
     mqtt_qos: i32,
 
     /// MQTT username
-    #[clap(long, env = "MQTT_USERNAME", default_value = "")]
+    #[clap(value_parser, long, env = "MQTT_USERNAME", default_value = "")]
     mqtt_username: String,
 
     /// MQTT password
-    #[clap(long, env = "MQTT_PASSWORD", default_value = "")]
+    #[clap(value_parser, long, env = "MQTT_PASSWORD", default_value = "")]
     mqtt_password: String,
 
     /// Prefix for MQTT topics (<PREFIX>/<ROOM ID>...)
-    #[clap(long, env = "MQTT_TOPIC_PREFIX", default_value = "matrix_bridge")]
+    #[clap(
+        value_parser,
+        long,
+        env = "MQTT_TOPIC_PREFIX",
+        default_value = "matrix_bridge"
+    )]
     mqtt_topic_prefix: String,
 
     /// Matrix username
-    #[clap(long, env = "MATRIX_USERNAME")]
+    #[clap(value_parser, long, env = "MATRIX_USERNAME")]
     matrix_username: String,
 
     /// Matrix password
-    #[clap(long, env = "MATRIX_PASSWORD")]
+    #[clap(value_parser, long, env = "MATRIX_PASSWORD")]
     matrix_password: String,
 
     /// IDs of Matrix rooms to interact with
+    #[clap(value_parser)]
     matrix_rooms: Vec<RoomId>,
 }
 
