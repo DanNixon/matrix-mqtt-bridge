@@ -3,11 +3,12 @@ mod mqtt;
 
 use anyhow::Result;
 use clap::Parser;
-use matrix_sdk::{ruma::RoomId, SyncSettings};
+use matrix_sdk::{config::SyncSettings, ruma::OwnedRoomId};
 use tokio::{signal, sync::broadcast};
 
 /// A bridge between Matrix and MQTT
 #[derive(Clone, Debug, Parser)]
+#[clap(author, version, about)]
 struct Cli {
     /// Address of MQTT broker to connect to
     #[clap(
@@ -58,7 +59,7 @@ struct Cli {
 
     /// IDs of Matrix rooms to interact with
     #[clap(value_parser)]
-    matrix_rooms: Vec<RoomId>,
+    matrix_rooms: Vec<OwnedRoomId>,
 }
 
 #[derive(Clone, Debug)]
@@ -70,7 +71,7 @@ enum Event {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Message {
-    pub room: RoomId,
+    pub room: OwnedRoomId,
     pub body: String,
 }
 

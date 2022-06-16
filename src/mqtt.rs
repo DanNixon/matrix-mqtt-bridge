@@ -2,7 +2,7 @@ use super::{Cli, Event};
 use anyhow::{anyhow, Result};
 use matrix_sdk::ruma::RoomId;
 use paho_mqtt::{AsyncClient, ConnectOptionsBuilder, CreateOptionsBuilder, Message};
-use std::{env, str::FromStr};
+use std::env;
 use tokio::{
     sync::broadcast::Sender,
     task::JoinHandle,
@@ -69,7 +69,7 @@ pub(crate) async fn run(tx: Sender<Event>, args: Cli) -> Result<JoinHandle<()>> 
                 Ok(Some(msg)) => {
                     log::info! {"Received message on topic \"{}\"", msg.topic()};
                     match msg.topic().split('/').nth(1) {
-                        Some(room) => match RoomId::from_str(room) {
+                        Some(room) => match RoomId::parse(room) {
                             Ok(room) => {
                                 if let Err(e) = tx.send(Event::MessageFromMqtt(super::Message {
                                     room,
