@@ -1,19 +1,24 @@
 use super::{Cli, Event, Message};
 use anyhow::Result;
 use matrix_sdk::{
+    config::SyncSettings,
     room::{Joined, Room},
     ruma::{
-        events::{room::message::MessageEventContent, AnyMessageEventContent, SyncMessageEvent},
+        events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent},
         UserId,
     },
-    Client, SyncSettings,
+    Client,
 };
+use std::ops::Deref;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 
 pub(crate) async fn login(tx: Sender<Event>, args: Cli) -> Result<Client> {
     log::info!("Logging into Matrix homeserver...");
-    let user = UserId::try_from(args.matrix_username.clone())?;
-    let client = Client::new_from_user_id(user.clone()).await?;
+    let user = UserId::parse(args.matrix_username.clone())?;
+    let client = Client::builder()
+        .homeserver_url(format!("https://{}", user.server_name()))
+        .build()
+        .await?;
     client
         .login(
             user.localpart(),
@@ -32,12 +37,15 @@ pub(crate) async fn login(tx: Sender<Event>, args: Cli) -> Result<Client> {
         .register_event_handler({
             let tx = tx.clone();
             let watched_rooms = args.matrix_rooms.clone();
-            move |event: SyncMessageEvent<MessageEventContent>, room: Room| {
+            move |event: SyncRoomMessageEvent, room: Room| {
                 let tx = tx.clone();
                 let watched_rooms = watched_rooms.clone();
                 async move {
                     if let Room::Joined(room) = room {
-                        if watched_rooms.contains(room.room_id()) {
+                        if watched_rooms
+                            .into_iter()
+                            .any(|r| r.deref() == room.room_id())
+                        {
                             log::info!("Received message in room {}", room.room_id());
                             parse_and_queue_message(&tx, event, room);
                         }
@@ -50,14 +58,10 @@ pub(crate) async fn login(tx: Sender<Event>, args: Cli) -> Result<Client> {
     Ok(client)
 }
 
-fn parse_and_queue_message(
-    tx: &Sender<Event>,
-    event: SyncMessageEvent<MessageEventContent>,
-    room: Joined,
-) {
+fn parse_and_queue_message(tx: &Sender<Event>, event: SyncRoomMessageEvent, room: Joined) {
     if let Ok(body) = serde_json::to_string(&event) {
         if let Err(e) = tx.send(Event::MessageFromMatrix(Message {
-            room: room.room_id().clone(),
+            room: room.room_id().to_owned(),
             body,
         })) {
             log::error!("Failed to notify of new message from MQTT: {}", e);
@@ -80,12 +84,7 @@ pub(crate) fn run_send_task(tx: Sender<Event>, client: Client) -> Result<JoinHan
                     if let Err(e) = client
                         .get_joined_room(&msg.room)
                         .unwrap()
-                        .send(
-                            AnyMessageEventContent::RoomMessage(MessageEventContent::text_plain(
-                                msg.body,
-                            )),
-                            None,
-                        )
+                        .send(RoomMessageEventContent::text_plain(msg.body), None)
                         .await
                     {
                         log::error!("Failed to send message: {}", e);
