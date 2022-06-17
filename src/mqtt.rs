@@ -1,8 +1,9 @@
 use super::{Cli, Event};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use matrix_sdk::ruma::RoomId;
-use paho_mqtt::{AsyncClient, ConnectOptionsBuilder, CreateOptionsBuilder, Message};
-use std::env;
+use paho_mqtt::{
+    AsyncClient, ConnectOptionsBuilder, CreateOptionsBuilder, Message, PersistenceType,
+};
 use tokio::{
     sync::broadcast::Sender,
     task::JoinHandle,
@@ -14,24 +15,35 @@ pub(crate) async fn run(tx: Sender<Event>, args: Cli) -> Result<JoinHandle<()>> 
         CreateOptionsBuilder::new()
             .server_uri(&args.mqtt_broker)
             .client_id(&args.mqtt_client_id)
-            .persistence(env::temp_dir())
+            .persistence(PersistenceType::None)
             .finalize(),
     )?;
 
     let stream = client.get_stream(25);
 
+    let topics_to_subscribe: Vec<String> = args
+        .matrix_rooms
+        .iter()
+        .map(|r| format!("{}/{}/send/text", args.mqtt_topic_prefix, r))
+        .collect();
+
+    client.set_connected_callback(move |c| {
+        for topic in &topics_to_subscribe {
+            c.subscribe(topic, args.mqtt_qos);
+        }
+    });
+
     client
         .connect(
             ConnectOptionsBuilder::new()
+                .clean_session(true)
+                .automatic_reconnect(Duration::from_secs(1), Duration::from_secs(5))
+                .keep_alive_interval(Duration::from_secs(5))
                 .user_name(&args.mqtt_username)
                 .password(&args.mqtt_password)
                 .finalize(),
         )
         .wait()?;
-
-    for topic in generate_subscriptions(&args) {
-        client.subscribe(&topic, args.mqtt_qos).await?;
-    }
 
     let mut rx = tx.subscribe();
 
@@ -65,58 +77,25 @@ pub(crate) async fn run(tx: Sender<Event>, args: Cli) -> Result<JoinHandle<()>> 
                 }
             }
 
-            match stream.try_recv() {
-                Ok(Some(msg)) => {
-                    log::info! {"Received message on topic \"{}\"", msg.topic()};
-                    match msg.topic().split('/').nth(1) {
-                        Some(room) => match RoomId::parse(room) {
-                            Ok(room) => {
-                                if let Err(e) = tx.send(Event::MessageFromMqtt(super::Message {
-                                    room,
-                                    body: msg.payload_str().to_string(),
-                                })) {
-                                    log::error!("Failed to notify of new message from MQTT: {}", e);
-                                }
+            if let Ok(Some(msg)) = stream.try_recv() {
+                log::info! {"Received message on topic \"{}\"", msg.topic()};
+                match msg.topic().split('/').nth(1) {
+                    Some(room) => match RoomId::parse(room) {
+                        Ok(room) => {
+                            if let Err(e) = tx.send(Event::MessageFromMqtt(super::Message {
+                                room,
+                                body: msg.payload_str().to_string(),
+                            })) {
+                                log::error!("Failed to notify of new message from MQTT: {}", e);
                             }
-                            Err(e) => log::error!("Failed to get room ID: {}", e),
-                        },
-                        None => log::error!("Failed to get room ID"),
-                    }
+                        }
+                        Err(e) => log::error!("Failed to get room ID: {}", e),
+                    },
+                    None => log::error!("Failed to get room ID"),
                 }
-                Ok(None) => {
-                    if let Err(e) = try_reconnect(&client).await {
-                        log::error!("Failed to reconnect: {}", e);
-                        tx.send(Event::Exit).unwrap();
-                    }
-                }
-                Err(_) => (),
             }
 
             beat.tick().await;
         }
     }))
-}
-
-fn generate_subscriptions(args: &Cli) -> Vec<String> {
-    args.matrix_rooms
-        .iter()
-        .map(|r| format!("{}/{}/send/text", args.mqtt_topic_prefix, r))
-        .collect()
-}
-
-async fn try_reconnect(c: &AsyncClient) -> Result<()> {
-    for i in 0..10 {
-        log::info!("Attempting reconnection {}...", i);
-        match c.reconnect().await {
-            Ok(_) => {
-                log::info!("Reconnection successful");
-                return Ok(());
-            }
-            Err(e) => {
-                log::error!("Reconnection failed: {}", e);
-            }
-        }
-        tokio::time::sleep(Duration::from_secs(1)).await;
-    }
-    Err(anyhow!("Failed to reconnect to broker"))
 }
