@@ -3,7 +3,10 @@ mod mqtt;
 
 use anyhow::Result;
 use clap::Parser;
+use kagiyama::Watcher;
 use matrix_sdk::{config::SyncSettings, ruma::OwnedRoomId};
+use serde::Serialize;
+use strum_macros::EnumIter;
 use tokio::{signal, sync::broadcast};
 
 /// A bridge between Matrix and MQTT
@@ -60,6 +63,20 @@ struct Cli {
     /// IDs of Matrix rooms to interact with
     #[clap(value_parser)]
     matrix_rooms: Vec<OwnedRoomId>,
+
+    /// Address to listen on for observability/metrics endpoints
+    #[clap(
+        value_parser,
+        long,
+        env = "OBSERVABILITY_ADDRESS",
+        default_value = "127.0.0.1:9090"
+    )]
+    observability_address: String,
+}
+
+#[derive(Clone, Serialize, EnumIter, PartialEq, Hash, Eq)]
+enum ReadinessConditions {
+    MqttBrokerConnectionIsAlive,
 }
 
 #[derive(Clone, Debug)]
@@ -83,10 +100,47 @@ async fn main() -> Result<()> {
 
     let (tx, mut rx) = broadcast::channel::<Event>(16);
 
+    let mut watcher = Watcher::<ReadinessConditions>::default();
+
+    if let Ok(registry) = watcher.sub_registry("mqtt") {
+        registry.register(
+            "connection_events",
+            "MQTT broker connection event count",
+            Box::new(mqtt::metrics::CONNECTION_EVENT.clone()),
+        );
+        registry.register(
+            "messages",
+            "MQTT message receive count",
+            Box::new(mqtt::metrics::MESSAGE_EVENT.clone()),
+        );
+        registry.register(
+            "delivery_failures",
+            "MQTT message receive count",
+            Box::new(mqtt::metrics::DELIVERY_FAILURES.clone()),
+        );
+    }
+
+    if let Ok(registry) = watcher.sub_registry("matrix") {
+        registry.register(
+            "messages",
+            "Matrix message receive count",
+            Box::new(matrix::metrics::MESSAGE_EVENT.clone()),
+        );
+        registry.register(
+            "delivery_failures",
+            "Matrix message receive count",
+            Box::new(matrix::metrics::DELIVERY_FAILURES.clone()),
+        );
+    }
+
+    watcher
+        .start_server(args.observability_address.clone().parse()?)
+        .await?;
+
     let matrix_client = matrix::login(tx.clone(), args.clone()).await?;
 
     let tasks = vec![
-        mqtt::run(tx.clone(), args).await?,
+        mqtt::run(tx.clone(), watcher.readiness_conditions(), args).await?,
         matrix::run_send_task(tx.clone(), matrix_client.clone())?,
     ];
 
@@ -115,6 +169,8 @@ async fn main() -> Result<()> {
     }
     matrix_sync_task.abort();
     let _ = matrix_sync_task.await;
+
+    watcher.stop_server()?;
 
     Ok(())
 }
