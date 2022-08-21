@@ -12,6 +12,29 @@ use matrix_sdk::{
 use std::ops::Deref;
 use tokio::{sync::broadcast::Sender, task::JoinHandle};
 
+pub(crate) mod metrics {
+    use lazy_static::lazy_static;
+    use prometheus_client::encoding::text::Encode;
+    use prometheus_client::metrics::{counter::Counter, family::Family};
+
+    #[derive(Clone, Eq, Hash, PartialEq, Encode)]
+    pub(crate) struct MessageEventLables {
+        room_id: String,
+    }
+
+    impl MessageEventLables {
+        pub(crate) fn new(room_id: String) -> Self {
+            Self { room_id }
+        }
+    }
+
+    lazy_static! {
+        pub(crate) static ref MESSAGE_EVENT: Family::<MessageEventLables, Counter> =
+            Family::<MessageEventLables, Counter>::default();
+        pub(crate) static ref DELIVERY_FAILURES: Counter = Counter::default();
+    }
+}
+
 pub(crate) async fn login(tx: Sender<Event>, args: Cli) -> Result<Client> {
     log::info!("Logging into Matrix homeserver...");
     let user = UserId::parse(args.matrix_username.clone())?;
@@ -47,6 +70,11 @@ pub(crate) async fn login(tx: Sender<Event>, args: Cli) -> Result<Client> {
                             .any(|r| r.deref() == room.room_id())
                         {
                             log::info!("Received message in room {}", room.room_id());
+                            metrics::MESSAGE_EVENT
+                                .get_or_create(&metrics::MessageEventLables::new(
+                                    room.room_id().to_string(),
+                                ))
+                                .inc();
                             parse_and_queue_message(&tx, event, room);
                         }
                     }
@@ -88,6 +116,7 @@ pub(crate) fn run_send_task(tx: Sender<Event>, client: Client) -> Result<JoinHan
                         .await
                     {
                         log::error!("Failed to send message: {}", e);
+                        metrics::DELIVERY_FAILURES.inc();
                     }
                 }
                 _ => {}
