@@ -76,6 +76,7 @@ struct Cli {
 
 #[derive(Clone, Serialize, EnumIter, PartialEq, Hash, Eq)]
 enum ReadinessConditions {
+    MatrixLoginAndInitialSyncComplete,
     MqttBrokerConnectionIsAlive,
 }
 
@@ -137,7 +138,8 @@ async fn main() -> Result<()> {
         .start_server(args.observability_address.clone().parse()?)
         .await?;
 
-    let matrix_client = matrix::login(tx.clone(), args.clone()).await?;
+    let matrix_client =
+        matrix::login(tx.clone(), watcher.readiness_conditions(), args.clone()).await?;
 
     let tasks = vec![
         mqtt::run(tx.clone(), watcher.readiness_conditions(), args).await?,
