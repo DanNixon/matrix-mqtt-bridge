@@ -1,5 +1,6 @@
-use super::{Cli, Event, Message};
+use super::{Cli, Event, Message, ReadinessConditions};
 use anyhow::Result;
+use kagiyama::ReadinessProbe;
 use matrix_sdk::{
     config::SyncSettings,
     room::{Joined, Room},
@@ -35,7 +36,11 @@ pub(crate) mod metrics {
     }
 }
 
-pub(crate) async fn login(tx: Sender<Event>, args: Cli) -> Result<Client> {
+pub(crate) async fn login(
+    tx: Sender<Event>,
+    mut readiness_conditions: ReadinessProbe<ReadinessConditions>,
+    args: Cli,
+) -> Result<Client> {
     log::info!("Logging into Matrix homeserver...");
     let user = UserId::parse(args.matrix_username.clone())?;
     let client = Client::builder()
@@ -55,6 +60,7 @@ pub(crate) async fn login(tx: Sender<Event>, args: Cli) -> Result<Client> {
     client.sync_once(SyncSettings::default()).await?;
 
     log::info!("Successfully logged in to Matrix homeserver");
+    readiness_conditions.mark_ready(ReadinessConditions::MatrixLoginAndInitialSyncComplete);
 
     client
         .register_event_handler({
