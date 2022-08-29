@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1.0.57"
 clap = { version = "3.2.5", features = ["derive", "env"] }
 env_logger = "0.9.0"
-kagiyama = "0.0.1"
+kagiyama = "0.0.2"
 lazy_static = "1.4.0"
 log = "0.4.17"
 matrix-sdk = { version = "0.5.0", default-features = false, features = ["e2e-encryption", "native-tls"] }

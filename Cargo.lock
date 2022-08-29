@@ -1060,9 +1060,9 @@ dependencies = [
 
 [[package]]
 name = "kagiyama"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b16de6a3ef8cda61e979e00c26da768f040c4621aa9c074c3fbc57860cea344"
+checksum = "3d1f03958eb2dab044cc23f88fa72f9bacbf68eb278df65df22b0690275072ff"
 dependencies = [
  "anyhow",
  "hyper",
@@ -1071,6 +1071,7 @@ dependencies = [
  "serde",
  "serde_json",
  "strum",
+ "strum_macros",
  "tokio",
  "tower",
 ]
@@ -1089,9 +1090,9 @@ checksum = "8371e4e5341c3a96db127eb2465ac681ced4c433e01dd0e938adbef26ba93ba5"
 
 [[package]]
 name = "lock_api"
-version = "0.4.7"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "327fa5b6a6940e4699ec49a9beae1ea4845c6bab9314e4f84ac68742139d8c53"
+checksum = "9f80bf5aacaf25cbfc8210d1cfb718f2bf3b11c4c54e5afe36c236853a8ec390"
 dependencies = [
  "autocfg",
  "scopeguard",
@@ -2142,9 +2143,9 @@ checksum = "2fd0db749597d91ff862fd1d55ea87f7855a744a8425a64695b6fca237d1dad1"
 
 [[package]]
 name = "socket2"
-version = "0.4.4"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66d72b759436ae32898a2af0a14218dbf55efde3feeb170eb623637db85ee1e0"
+checksum = "10c98bba371b9b22a71a9414e420f92ddeb2369239af08200816169d5e2dd7aa"
 dependencies = [
  "libc",
  "winapi",
