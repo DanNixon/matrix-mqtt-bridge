@@ -103,7 +103,11 @@ async fn main() -> Result<()> {
 
     let mut watcher = Watcher::<ReadinessConditions>::default();
 
-    if let Ok(registry) = watcher.sub_registry("mqtt") {
+    {
+        let mut registry = watcher.metrics_registry();
+
+        let registry = registry.sub_registry_with_prefix("mqtt");
+
         registry.register(
             "connection_events",
             "MQTT broker connection event count",
@@ -119,9 +123,9 @@ async fn main() -> Result<()> {
             "MQTT message receive count",
             Box::new(mqtt::metrics::DELIVERY_FAILURES.clone()),
         );
-    }
 
-    if let Ok(registry) = watcher.sub_registry("matrix") {
+        let registry = registry.sub_registry_with_prefix("matrix");
+
         registry.register(
             "messages",
             "Matrix message receive count",
@@ -138,11 +142,10 @@ async fn main() -> Result<()> {
         .start_server(args.observability_address.clone().parse()?)
         .await?;
 
-    let matrix_client =
-        matrix::login(tx.clone(), watcher.readiness_conditions(), args.clone()).await?;
+    let matrix_client = matrix::login(tx.clone(), watcher.readiness_probe(), args.clone()).await?;
 
     let tasks = vec![
-        mqtt::run(tx.clone(), watcher.readiness_conditions(), args).await?,
+        mqtt::run(tx.clone(), watcher.readiness_probe(), args).await?,
         matrix::run_send_task(tx.clone(), matrix_client.clone())?,
     ];
 
