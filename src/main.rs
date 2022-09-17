@@ -105,37 +105,42 @@ async fn main() -> Result<()> {
 
     {
         let mut registry = watcher.metrics_registry();
+        let registry = registry.sub_registry_with_prefix("matrixmqttbridge");
 
-        let registry = registry.sub_registry_with_prefix("mqtt");
+        {
+            let registry = registry.sub_registry_with_prefix("mqtt");
 
-        registry.register(
-            "connection_events",
-            "MQTT broker connection event count",
-            Box::new(mqtt::metrics::CONNECTION_EVENT.clone()),
-        );
-        registry.register(
-            "messages",
-            "MQTT message receive count",
-            Box::new(mqtt::metrics::MESSAGE_EVENT.clone()),
-        );
-        registry.register(
-            "delivery_failures",
-            "MQTT message receive count",
-            Box::new(mqtt::metrics::DELIVERY_FAILURES.clone()),
-        );
+            registry.register(
+                "connection_events",
+                "MQTT broker connection event count",
+                Box::new(mqtt::metrics::CONNECTION_EVENT.clone()),
+            );
+            registry.register(
+                "messages",
+                "MQTT message receive count",
+                Box::new(mqtt::metrics::MESSAGE_EVENT.clone()),
+            );
+            registry.register(
+                "delivery_failures",
+                "MQTT message receive count",
+                Box::new(mqtt::metrics::DELIVERY_FAILURES.clone()),
+            );
+        }
 
-        let registry = registry.sub_registry_with_prefix("matrix");
+        {
+            let registry = registry.sub_registry_with_prefix("matrix");
 
-        registry.register(
-            "messages",
-            "Matrix message receive count",
-            Box::new(matrix::metrics::MESSAGE_EVENT.clone()),
-        );
-        registry.register(
-            "delivery_failures",
-            "Matrix message receive count",
-            Box::new(matrix::metrics::DELIVERY_FAILURES.clone()),
-        );
+            registry.register(
+                "messages",
+                "Matrix message receive count",
+                Box::new(matrix::metrics::MESSAGE_EVENT.clone()),
+            );
+            registry.register(
+                "delivery_failures",
+                "Matrix message receive count",
+                Box::new(matrix::metrics::DELIVERY_FAILURES.clone()),
+            );
+        }
     }
 
     watcher
