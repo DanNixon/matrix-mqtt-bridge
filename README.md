@@ -1,4 +1,7 @@
-# matrix-mqtt-bridge [![CI](https://github.com/DanNixon/matrix-mqtt-bridge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DanNixon/matrix-mqtt-bridge/actions/workflows/ci.yml)
+# matrix-mqtt-bridge
+
+[![CI](https://github.com/DanNixon/matrix-mqtt-bridge/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DanNixon/matrix-mqtt-bridge/actions/workflows/ci.yml)
+[![dependency status](https://deps.rs/repo/github/dannixon/matrix-mqtt-bridge/status.svg)](https://deps.rs/repo/github/dannixon/matrix-mqtt-bridge)
 
 Bridge between Matrix and MQTT.
 
