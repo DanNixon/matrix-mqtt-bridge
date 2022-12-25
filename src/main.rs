@@ -1,13 +1,17 @@
 mod matrix;
-mod mqtt;
 
 use anyhow::Result;
 use clap::Parser;
 use kagiyama::Watcher;
-use matrix_sdk::{config::SyncSettings, ruma::OwnedRoomId};
+use matrix_sdk::{
+    config::SyncSettings,
+    ruma::{OwnedRoomId, RoomId},
+};
+use mqtt_channel_client as mqtt;
 use serde::Serialize;
+use std::time::Duration;
 use strum_macros::EnumIter;
-use tokio::{signal, sync::broadcast};
+use tokio::sync::broadcast;
 
 /// A bridge between Matrix and MQTT
 #[derive(Clone, Debug, Parser)]
@@ -101,31 +105,20 @@ async fn main() -> Result<()> {
 
     let (tx, mut rx) = broadcast::channel::<Event>(16);
 
-    let mut watcher = Watcher::<ReadinessConditions>::default();
+    let mqtt_client = mqtt::Client::new(
+        paho_mqtt::create_options::CreateOptionsBuilder::new()
+            .server_uri(&args.mqtt_broker)
+            .client_id(&args.mqtt_client_id)
+            .persistence(paho_mqtt::PersistenceType::None)
+            .finalize(),
+        mqtt::ClientConfig::default(),
+    )?;
 
+    let mut watcher = Watcher::<ReadinessConditions>::default();
     {
         let mut registry = watcher.metrics_registry();
         let registry = registry.sub_registry_with_prefix("matrixmqttbridge");
-
-        {
-            let registry = registry.sub_registry_with_prefix("mqtt");
-
-            registry.register(
-                "connection_events",
-                "MQTT broker connection event count",
-                mqtt::metrics::CONNECTION_EVENT.clone(),
-            );
-            registry.register(
-                "messages",
-                "MQTT message receive count",
-                mqtt::metrics::MESSAGE_EVENT.clone(),
-            );
-            registry.register(
-                "delivery_failures",
-                "MQTT message receive count",
-                mqtt::metrics::DELIVERY_FAILURES.clone(),
-            );
-        }
+        mqtt_client.register_metrics(registry);
 
         {
             let registry = registry.sub_registry_with_prefix("matrix");
@@ -142,43 +135,106 @@ async fn main() -> Result<()> {
             );
         }
     }
-
+    let mut readiness_conditions = watcher.readiness_probe();
     watcher
         .start_server(args.observability_address.clone().parse()?)
         .await;
 
+    mqtt_client
+        .start(
+            paho_mqtt::connect_options::ConnectOptionsBuilder::new()
+                .clean_session(true)
+                .automatic_reconnect(Duration::from_secs(1), Duration::from_secs(5))
+                .keep_alive_interval(Duration::from_secs(5))
+                .user_name(&args.mqtt_username)
+                .password(&args.mqtt_password)
+                .finalize(),
+        )
+        .await?;
+
+    for topic in args
+        .matrix_rooms
+        .iter()
+        .map(|room| format!("{}/{}/send/text", args.mqtt_topic_prefix, room))
+    {
+        mqtt_client.subscribe(
+            mqtt::SubscriptionBuilder::default()
+                .topic(topic)
+                .qos(args.mqtt_qos)
+                .build()
+                .unwrap(),
+        );
+    }
+
     let matrix_client = matrix::login(tx.clone(), watcher.readiness_probe(), args.clone()).await?;
-
-    let tasks = vec![
-        mqtt::run(tx.clone(), watcher.readiness_probe(), args).await?,
-        matrix::run_send_task(tx.clone(), matrix_client.clone())?,
-    ];
-
+    let matrix_task = matrix::run_send_task(tx.clone(), matrix_client.clone())?;
     let matrix_sync_task = tokio::spawn(async move {
         matrix_client
             .sync(SyncSettings::default().token(matrix_client.sync_token().await.unwrap()))
             .await;
     });
 
+    let mut mqtt_rx = mqtt_client.rx_channel();
     loop {
-        let should_exit = tokio::select! {
-            _ = signal::ctrl_c() => true,
-            event = rx.recv() => matches!(event, Ok(Event::Exit)),
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                tx.send(Event::Exit).unwrap();
+            },
+            event = rx.recv() => {
+                match event {
+                    Ok(Event::Exit) => {
+                        log::info!("Exiting");
+                        break;
+                    }
+                    Ok(Event::MessageFromMatrix(msg)) => {
+                        let msg = paho_mqtt::Message::new(
+                            format!("{}/{}", &args.mqtt_topic_prefix, msg.room),
+                            msg.body.clone(),
+                            args.mqtt_qos,
+                        );
+                        if let Err(e) = mqtt_client.send(msg) {
+                            log::warn!("{}", e);
+                        }
+                    }
+                    _ => {}
+                }
+            },
+            event = mqtt_rx.recv() => {
+                match event {
+                    Ok(mqtt::Event::Status(mqtt::StatusEvent::Connected)) => {
+                        readiness_conditions.mark_ready(ReadinessConditions::MqttBrokerConnectionIsAlive);
+                    }
+                    Ok(mqtt::Event::Status(mqtt::StatusEvent::Disconnected)) => {
+                        readiness_conditions.mark_not_ready(ReadinessConditions::MqttBrokerConnectionIsAlive);
+                    }
+                    Ok(mqtt::Event::Rx(msg)) => {
+                        log::info!("Received message on topic \"{}\"", msg.topic());
+                        match msg.topic().split('/').nth(1) {
+                            Some(room) => match RoomId::parse(room) {
+                                Ok(room) => {
+                                    if let Err(e) = tx.send(Event::MessageFromMqtt(Message {
+                                        room,
+                                        body: msg.payload_str().to_string(),
+                                    })) {
+                                        log::error!("Failed to notify of new message from MQTT: {}", e);
+                                    }
+                                }
+                                Err(e) => log::error!("Failed to get room ID: {}", e),
+                            },
+                            None => log::error!("Failed to get room ID"),
+                        }
+                    }
+                    _ => {}
+                }
+            }
         };
-        if should_exit {
-            break;
-        }
     }
 
-    log::info!("Terminating...");
-    tx.send(Event::Exit)?;
-    for task in tasks {
-        if let Err(e) = task.await {
-            log::error!("Failed waiting for task to finish: {}", e);
-        }
-    }
+    let _ = matrix_task.await;
     matrix_sync_task.abort();
     let _ = matrix_sync_task.await;
+
+    let _ = mqtt_client.stop().await;
 
     watcher.stop_server()?;
 
