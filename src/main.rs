@@ -113,17 +113,17 @@ async fn main() -> Result<()> {
             registry.register(
                 "connection_events",
                 "MQTT broker connection event count",
-                Box::new(mqtt::metrics::CONNECTION_EVENT.clone()),
+                mqtt::metrics::CONNECTION_EVENT.clone(),
             );
             registry.register(
                 "messages",
                 "MQTT message receive count",
-                Box::new(mqtt::metrics::MESSAGE_EVENT.clone()),
+                mqtt::metrics::MESSAGE_EVENT.clone(),
             );
             registry.register(
                 "delivery_failures",
                 "MQTT message receive count",
-                Box::new(mqtt::metrics::DELIVERY_FAILURES.clone()),
+                mqtt::metrics::DELIVERY_FAILURES.clone(),
             );
         }
 
@@ -133,19 +133,19 @@ async fn main() -> Result<()> {
             registry.register(
                 "messages",
                 "Matrix message receive count",
-                Box::new(matrix::metrics::MESSAGE_EVENT.clone()),
+                matrix::metrics::MESSAGE_EVENT.clone(),
             );
             registry.register(
                 "delivery_failures",
                 "Matrix message receive count",
-                Box::new(matrix::metrics::DELIVERY_FAILURES.clone()),
+                matrix::metrics::DELIVERY_FAILURES.clone(),
             );
         }
     }
 
     watcher
         .start_server(args.observability_address.clone().parse()?)
-        .await?;
+        .await;
 
     let matrix_client = matrix::login(tx.clone(), watcher.readiness_probe(), args.clone()).await?;
 
