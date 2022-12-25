@@ -13,10 +13,10 @@ use tokio::{
 
 pub(crate) mod metrics {
     use lazy_static::lazy_static;
-    use prometheus_client::encoding::text::Encode;
+    use prometheus_client::encoding::{EncodeLabelSet, EncodeLabelValue};
     use prometheus_client::metrics::{counter::Counter, family::Family};
 
-    #[derive(Clone, Eq, Hash, PartialEq, Encode)]
+    #[derive(Debug, Clone, Eq, Hash, PartialEq, EncodeLabelSet)]
     pub(crate) struct ConnectionEventLables {
         event: ConnectionEventType,
     }
@@ -27,14 +27,14 @@ pub(crate) mod metrics {
         }
     }
 
-    #[derive(Clone, Eq, Hash, PartialEq, Encode)]
+    #[derive(Debug, Clone, Eq, Hash, PartialEq, EncodeLabelValue)]
     pub(crate) enum ConnectionEventType {
         Connected,
         Disconnected,
         Lost,
     }
 
-    #[derive(Clone, Eq, Hash, PartialEq, Encode)]
+    #[derive(Debug, Clone, Eq, Hash, PartialEq, EncodeLabelSet)]
     pub(crate) struct MessageEventLables {
         kind: String,
         room_id: String,
