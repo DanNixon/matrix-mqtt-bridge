@@ -48,12 +48,9 @@ pub(crate) async fn login(
         .build()
         .await?;
     client
-        .login(
-            user.localpart(),
-            &args.matrix_password,
-            None,
-            Some("matrix-mqtt-bridge"),
-        )
+        .login_username(user.localpart(), &args.matrix_password)
+        .initial_device_display_name("MQTT bridge")
+        .send()
         .await?;
 
     log::info!("Performing initial sync...");
@@ -62,32 +59,30 @@ pub(crate) async fn login(
     log::info!("Successfully logged in to Matrix homeserver");
     readiness_conditions.mark_ready(ReadinessConditions::MatrixLoginAndInitialSyncComplete);
 
-    client
-        .register_event_handler({
+    client.add_event_handler({
+        let tx = tx.clone();
+        let watched_rooms = args.matrix_rooms.clone();
+        move |event: SyncRoomMessageEvent, room: Room| {
             let tx = tx.clone();
-            let watched_rooms = args.matrix_rooms.clone();
-            move |event: SyncRoomMessageEvent, room: Room| {
-                let tx = tx.clone();
-                let watched_rooms = watched_rooms.clone();
-                async move {
-                    if let Room::Joined(room) = room {
-                        if watched_rooms
-                            .into_iter()
-                            .any(|r| r.deref() == room.room_id())
-                        {
-                            log::info!("Received message in room {}", room.room_id());
-                            metrics::MESSAGE_EVENT
-                                .get_or_create(&metrics::MessageEventLables::new(
-                                    room.room_id().to_string(),
-                                ))
-                                .inc();
-                            parse_and_queue_message(&tx, event, room);
-                        }
+            let watched_rooms = watched_rooms.clone();
+            async move {
+                if let Room::Joined(room) = room {
+                    if watched_rooms
+                        .into_iter()
+                        .any(|r| r.deref() == room.room_id())
+                    {
+                        log::info!("Received message in room {}", room.room_id());
+                        metrics::MESSAGE_EVENT
+                            .get_or_create(&metrics::MessageEventLables::new(
+                                room.room_id().to_string(),
+                            ))
+                            .inc();
+                        parse_and_queue_message(&tx, event, room);
                     }
                 }
             }
-        })
-        .await;
+        }
+    });
 
     Ok(client)
 }
