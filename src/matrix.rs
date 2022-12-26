@@ -1,12 +1,14 @@
-use super::{Cli, Event, Message, ReadinessConditions};
+use super::{Event, Message, ReadinessConditions};
+use crate::cli::Cli;
 use anyhow::Result;
 use kagiyama::ReadinessProbe;
 use matrix_sdk::{
     config::SyncSettings,
-    room::{Joined, Room},
+    event_handler::Ctx,
+    room::Room,
     ruma::{
         events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent},
-        UserId,
+        OwnedRoomId, UserId,
     },
     Client,
 };
@@ -36,64 +38,89 @@ pub(crate) mod metrics {
     }
 }
 
+#[derive(Clone)]
+struct CallbackContext {
+    watched_rooms: Vec<OwnedRoomId>,
+    tx: Sender<Event>,
+}
+
 pub(crate) async fn login(
     tx: Sender<Event>,
     mut readiness_conditions: ReadinessProbe<ReadinessConditions>,
     args: Cli,
 ) -> Result<Client> {
-    log::info!("Logging into Matrix homeserver...");
     let user = UserId::parse(args.matrix_username.clone())?;
+
     let client = Client::builder()
-        .homeserver_url(format!("https://{}", user.server_name()))
+        .server_name(user.server_name())
+        .sled_store(args.matrix_sled_path(), None)?
         .build()
         .await?;
-    client
-        .login_username(user.localpart(), &args.matrix_password)
-        .initial_device_display_name("MQTT bridge")
-        .send()
-        .await?;
 
-    log::info!("Performing initial sync...");
+    if args.matrix_session_filename().exists() {
+        log::info!("Restored login");
+
+        // Load the session from file
+        let session_file = std::fs::File::open(args.matrix_session_filename())?;
+        let session = serde_json::from_reader(session_file)?;
+
+        // Login
+        client.restore_login(session).await?;
+    } else {
+        log::info!("Initial login");
+
+        // Login
+        client
+            .login_username(user.localpart(), &args.matrix_password)
+            .initial_device_display_name("MQTT bridge")
+            .send()
+            .await?;
+
+        // Save the session to file
+        let session = client.session().expect("Session should exist after login");
+        let session_file = std::fs::File::create(args.matrix_session_filename())?;
+        serde_json::to_writer(session_file, &session)?;
+    }
+
+    log::info!("Performing initial sync");
     client.sync_once(SyncSettings::default()).await?;
 
     log::info!("Successfully logged in to Matrix homeserver");
     readiness_conditions.mark_ready(ReadinessConditions::MatrixLoginAndInitialSyncComplete);
 
-    client.add_event_handler({
-        let tx = tx.clone();
-        let watched_rooms = args.matrix_rooms.clone();
-        move |event: SyncRoomMessageEvent, room: Room| {
-            let tx = tx.clone();
-            let watched_rooms = watched_rooms.clone();
-            async move {
-                if let Room::Joined(room) = room {
-                    if watched_rooms
-                        .into_iter()
-                        .any(|r| r.deref() == room.room_id())
-                    {
-                        log::info!("Received message in room {}", room.room_id());
-                        metrics::MESSAGE_EVENT
-                            .get_or_create(&metrics::MessageEventLables::new(
-                                room.room_id().to_string(),
-                            ))
-                            .inc();
-                        parse_and_queue_message(&tx, event, room);
-                    }
-                }
-            }
-        }
-    });
+    let context = CallbackContext {
+        watched_rooms: args.matrix_rooms.clone(),
+        tx: tx.clone(),
+    };
+    client.add_event_handler_context(context);
+
+    client.add_event_handler(handle_message);
 
     Ok(client)
 }
 
-fn parse_and_queue_message(tx: &Sender<Event>, event: SyncRoomMessageEvent, room: Joined) {
-    if let Ok(body) = serde_json::to_string(&event) {
-        if let Err(e) = tx.send(Event::MessageFromMatrix(Message {
-            room: room.room_id().to_owned(),
-            body,
-        })) {
-            log::error!("Failed to notify of new message from MQTT: {}", e);
+async fn handle_message(event: SyncRoomMessageEvent, room: Room, context: Ctx<CallbackContext>) {
+    if let Room::Joined(room) = room {
+        if context
+            .watched_rooms
+            .iter()
+            .any(|r| r.deref() == room.room_id())
+        {
+            log::info!("Received message in room {}", room.room_id());
+            metrics::MESSAGE_EVENT
+                .get_or_create(&metrics::MessageEventLables::new(
+                    room.room_id().to_string(),
+                ))
+                .inc();
+
+            if let Ok(body) = serde_json::to_string(&event) {
+                if let Err(e) = context.tx.send(Event::MessageFromMatrix(Message {
+                    room: room.room_id().to_owned(),
+                    body,
+                })) {
+                    log::error!("Failed to notify of new message from MQTT: {}", e);
+                }
+            }
         }
     }
 }
@@ -109,7 +136,7 @@ pub(crate) fn run_send_task(tx: Sender<Event>, client: Client) -> Result<JoinHan
                     return;
                 }
                 Event::MessageFromMqtt(msg) => {
-                    log::debug!("Sending message...");
+                    log::debug!("Sending message");
                     if let Err(e) = client
                         .get_joined_room(&msg.room)
                         .unwrap()
