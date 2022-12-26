@@ -1,25 +1,25 @@
-FROM docker.io/library/rust:alpine3.15 as builder
+FROM docker.io/library/rust:bullseye as builder
 
-RUN apk add \
-  cmake \
-  g++ \
-  libc-dev \
-  make \
-  openssl-dev \
-  pkgconf
+RUN apt-get update && \
+    apt-get install -y \
+      cmake
 
 COPY . .
-RUN RUSTFLAGS=-Ctarget-feature=-crt-static cargo install \
+RUN cargo install \
   --path . \
   --root /usr/local
 
-FROM docker.io/library/alpine:3.15
-
-RUN apk add \
-  libgcc
+FROM docker.io/library/debian:bullseye-slim
 
 COPY --from=builder \
   /usr/local/bin/matrix-mqtt-bridge \
   /usr/local/bin/matrix-mqtt-bridge
+
+RUN mkdir /data
+VOLUME /data
+ENV MATRIX_STORAGE=/data
+
+ENV OBSERVABILITY_ADDRESS "0.0.0.0:9090"
+EXPOSE 9090
 
 ENTRYPOINT ["/usr/local/bin/matrix-mqtt-bridge"]
