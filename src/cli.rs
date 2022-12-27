@@ -70,19 +70,3 @@ pub(crate) struct Cli {
     )]
     pub(crate) observability_address: String,
 }
-
-impl Cli {
-    pub(crate) fn create_matrix_storage_dir(&self) {
-        if let Err(e) = std::fs::create_dir_all(&self.matrix_storage) {
-            log::warn!("Failed to create Matrix storage directory, error={}", e);
-        }
-    }
-
-    pub(crate) fn matrix_sled_path(&self) -> PathBuf {
-        self.matrix_storage.join("sled")
-    }
-
-    pub(crate) fn matrix_session_filename(&self) -> PathBuf {
-        self.matrix_storage.join("session.json")
-    }
-}
