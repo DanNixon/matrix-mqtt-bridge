@@ -2,6 +2,11 @@ mod cli;
 
 use anyhow::Result;
 use clap::Parser;
+use kagiyama::prometheus::{
+    self as prometheus_client,
+    encoding::EncodeLabelSet,
+    metrics::{counter::Counter, family::Family},
+};
 use kagiyama::Watcher;
 use lazy_static::lazy_static;
 use matrix_sdk::{
@@ -13,10 +18,6 @@ use matrix_sdk::{
     },
 };
 use mqtt_channel_client as mqtt;
-use prometheus_client::{
-    encoding::EncodeLabelSet,
-    metrics::{counter::Counter, family::Family},
-};
 use serde::Serialize;
 use std::{ops::Deref, time::Duration};
 use strum_macros::EnumIter;
@@ -59,10 +60,10 @@ async fn main() -> Result<()> {
     let (tx, mut rx) = broadcast::channel::<Event>(16);
 
     let mqtt_client = mqtt::Client::new(
-        paho_mqtt::create_options::CreateOptionsBuilder::new()
+        mqtt::paho_mqtt::create_options::CreateOptionsBuilder::new()
             .server_uri(&args.mqtt_broker)
             .client_id(&args.mqtt_client_id)
-            .persistence(paho_mqtt::PersistenceType::None)
+            .persistence(mqtt::paho_mqtt::PersistenceType::None)
             .finalize(),
         mqtt::ClientConfig::default(),
     )?;
@@ -95,7 +96,7 @@ async fn main() -> Result<()> {
 
     mqtt_client
         .start(
-            paho_mqtt::connect_options::ConnectOptionsBuilder::new()
+            mqtt::paho_mqtt::connect_options::ConnectOptionsBuilder::new()
                 .clean_session(true)
                 .automatic_reconnect(Duration::from_secs(1), Duration::from_secs(5))
                 .keep_alive_interval(Duration::from_secs(5))
@@ -200,7 +201,7 @@ async fn handle_matrix_message(
                 .inc();
 
             if let Ok(body) = serde_json::to_string(&event) {
-                let msg = paho_mqtt::Message::new(
+                let msg = mqtt::paho_mqtt::Message::new(
                     format!(
                         "{}/{}",
                         &context.args.mqtt_topic_prefix,
@@ -221,7 +222,7 @@ async fn handle_matrix_message(
     }
 }
 
-async fn handle_mqtt_message(matrix_client: &matrix_sdk::Client, msg: &paho_mqtt::Message) {
+async fn handle_mqtt_message(matrix_client: &matrix_sdk::Client, msg: &mqtt::paho_mqtt::Message) {
     log::info!("Received message on topic \"{}\"", msg.topic());
     match msg.topic().split('/').nth(1) {
         Some(room) => match RoomId::parse(room) {
